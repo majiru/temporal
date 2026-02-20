@@ -10,6 +10,7 @@ import (
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/util"
 )
@@ -515,6 +516,13 @@ func (d *matcherData) findAndWakeMatches() {
 		// ready to signal match
 		d.tasks.Remove(task)
 		d.pollers.Remove(poller)
+
+		// TODO: Remove after debugging flaky test
+		// Log the matched task's priority and the remaining tasks in the heap
+		d.logger.Info("findAndWakeMatches matched task",
+			tag.NewInt64("matched-task-id", task.event.TaskId),
+			tag.NewInt64("matched-effective-priority", int64(task.effectivePriority)),
+			tag.NewInt64("remaining-tasks-in-heap", int64(len(d.tasks.heap))))
 
 		// TODO(pri): maybe we can allow tasks to have costs other than 1
 		d.rateLimitManager.consumeTokens(now, task, 1)

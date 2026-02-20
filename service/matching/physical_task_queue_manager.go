@@ -562,6 +562,10 @@ func (c *physicalTaskQueueManagerImpl) AddSpooledTaskToMatcher(task *internalTas
 		softassert.Fail(c.logger, "AddSpooledTaskToMatcher called on old matcher")
 		return errInternalMatchError
 	}
+	// TODO: Remove after debugging flaky test
+	c.logger.Info("AddSpooledTaskToMatcher adding task to matcher",
+		tag.NewInt64("task-id", task.event.TaskId),
+		tag.NewInt64("effective-priority", int64(task.effectivePriority)))
 	return c.priMatcher.AddTask(task)
 }
 

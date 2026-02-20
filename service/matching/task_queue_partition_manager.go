@@ -661,6 +661,17 @@ func (pm *taskQueuePartitionManagerImpl) AddSpooledTask(
 	}
 	// mark if task is being redirected from queue it was read from (V2 or V3 versioning)
 	task.redirectedFromBacklog = syncMatchQueue.QueueKey() != backlogQueue
+
+	// TODO: Remove after debugging flaky test
+	// Log when task is being re-added to matcher, especially if routing to a different queue
+	pm.logger.Info("AddSpooledTask routing task",
+		tag.NewInt64("task-id", task.event.TaskId),
+		tag.NewInt64("effective-priority", int64(task.effectivePriority)),
+		tag.NewStringTag("source-backlog", backlogQueue.PersistenceName()),
+		tag.NewStringTag("dest-sync-match", syncMatchQueue.QueueKey().PersistenceName()),
+		tag.NewBoolTag("redirected-from-backlog", task.redirectedFromBacklog),
+		tag.NewBoolTag("queues-differ", syncMatchQueue.QueueKey() != backlogQueue))
+
 	if !backlogQueue.version.Deployment().Equal(newBacklogQueue.QueueKey().version.Deployment()) {
 		// Backlog queue has changed, spool to the new queue. This should happen rarely: when
 		// activity of pinned workflow was determined independent and sent to the default queue
