@@ -120,6 +120,15 @@ func (tr *fairTaskReader) getOldestBacklogTime() time.Time {
 }
 
 func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
+	// TODO: Remove after debugging flaky test
+	isDraining := tr.backlogMgr.isDraining
+	err := res.err()
+	tr.logger.Info("fairTaskReader.completeTask called",
+		tag.NewBoolTag("is-draining", isDraining),
+		tag.NewInt64("task-id", task.event.TaskId),
+		tag.NewInt64("effective-priority", int64(task.effectivePriority)),
+		tag.Error(err))
+
 	tr.lock.Lock()
 
 	// We might have a race where mergeTasks tries to read a task from matcher (because new tasks
@@ -130,6 +139,9 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	// We can't ack the task, so we'll eventually read it again and then discover that it's a
 	// duplicate when we try to RecordTaskStarted.
 	if task, found := tr.outstandingTasks.Get(fairLevelFromAllocatedTask(task.event.AllocatedTaskInfo)); !found {
+		// TODO: Remove after debugging flaky test
+		tr.logger.Info("fairTaskReader.completeTask task not found in outstandingTasks",
+			tag.NewBoolTag("is-draining", isDraining))
 		metrics.TaskCompletedMissing.With(tr.backlogMgr.metricsHandler).Record(1)
 		tr.lock.Unlock()
 		return
@@ -139,8 +151,12 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 	}
 
 	// Handle happy path first:
-	err := res.err()
 	if err == nil {
+		// TODO: Remove after debugging flaky test
+		tr.logger.Info("fairTaskReader.completeTask completing task successfully",
+			tag.NewBoolTag("is-draining", isDraining),
+			tag.NewInt64("task-id", task.event.TaskId),
+			tag.NewInt64("loaded-tasks-before", int64(tr.loadedTasks)))
 		tr.completeTaskLocked(task)
 		tr.lock.Unlock()
 		return
@@ -160,12 +176,21 @@ func (tr *fairTaskReader) completeTask(task *internalTask, res taskResponse) {
 		// trying the same task immediately. maybe also: after a few attempts on the same task,
 		// let it get cycled to the end of the queue, in case there's some task/wf-specific
 		// thing.
+		// TODO: Remove after debugging flaky test
+		tr.logger.Info("fairTaskReader.completeTask re-queueing task due to transient error",
+			tag.NewBoolTag("is-draining", isDraining),
+			tag.NewInt64("task-id", task.event.TaskId))
 		tr.addTaskToMatcher(task)
 		metrics.TaskRetryTransient.With(tr.backlogMgr.metricsHandler).Record(1)
 		return
 	}
 
 	// On other errors: ask backlog manager to re-spool to persistence
+	// TODO: Remove after debugging flaky test
+	tr.logger.Info("fairTaskReader.completeTask re-spooling task due to error",
+		tag.NewBoolTag("is-draining", isDraining),
+		tag.NewInt64("task-id", task.event.TaskId),
+		tag.Error(err))
 	if tr.backlogMgr.respoolTaskAfterError(task.event.Data) != nil {
 		return // task queue will unload now
 	}
