@@ -585,16 +585,32 @@ func (tr *fairTaskReader) advanceAckLevelLocked() {
 
 	// Adjust the ack level as far as we can
 	var numAcked int64
+	var blockedBy *internalTask
 	for {
 		minLevel, v := tr.outstandingTasks.Min()
 		if minLevel == nil {
 			break
-		} else if _, ok := v.(*internalTask); ok {
+		} else if task, ok := v.(*internalTask); ok {
+			blockedBy = task
 			break
 		}
 		tr.ackLevel = minLevel.(fairLevel) // nolint:revive
 		tr.outstandingTasks.Remove(minLevel)
 		numAcked += 1
+	}
+
+	// TODO: Remove after debugging flaky test
+	if numAcked > 0 || blockedBy != nil {
+		var blockedByTaskID int64
+		if blockedBy != nil && blockedBy.event != nil {
+			blockedByTaskID = blockedBy.event.TaskId
+		}
+		tr.logger.Info("advanceAckLevelLocked",
+			tag.NewBoolTag("is-draining", tr.backlogMgr.isDraining),
+			tag.NewInt64("num-acked", numAcked),
+			tag.NewInt64("loaded-tasks", int64(tr.loadedTasks)),
+			tag.NewInt64("blocked-by-task-id", blockedByTaskID),
+			tag.NewInt64("known-count", tr.knownCountLocked()))
 	}
 
 	if numAcked > 0 {

@@ -313,6 +313,9 @@ func (db *taskQueueDB) updateAckLevelAndBacklogStats(subqueue subqueueIndex, new
 		dbQueue.AckLevel = newAckLevel
 	}
 
+	// TODO: Remove after debugging flaky test
+	oldCount := dbQueue.ApproximateBacklogCount
+
 	if newAckLevel == db.getMaxReadLevelLocked(subqueue) {
 		// Reset approximateBacklogCount to fix the count divergence issue
 		if dbQueue.ApproximateBacklogCount != 0 || !dbQueue.oldestTime.Equal(oldestTime) {
@@ -324,6 +327,13 @@ func (db *taskQueueDB) updateAckLevelAndBacklogStats(subqueue subqueueIndex, new
 		db.lastChange = time.Now()
 		db.updateBacklogStatsLocked(subqueue, countDelta, oldestTime)
 	}
+
+	// TODO: Remove after debugging flaky test
+	db.logger.Info("updateAckLevelAndBacklogStats updated count",
+		tag.Int("subqueue-id", int(subqueue)),
+		tag.NewInt64("count-delta", countDelta),
+		tag.NewInt64("old-count", oldCount),
+		tag.NewInt64("new-count", dbQueue.ApproximateBacklogCount))
 }
 
 func (db *taskQueueDB) updateFairAckLevel(subqueue subqueueIndex, newAckLevel fairLevel, countDelta, knownCount int64, oldestTime time.Time) {
@@ -341,6 +351,9 @@ func (db *taskQueueDB) updateFairAckLevel(subqueue subqueueIndex, newAckLevel fa
 	}
 	dbQueue.FairAckLevel = newAckLevel.toProto()
 
+	// TODO: Remove after debugging flaky test
+	oldCount := dbQueue.ApproximateBacklogCount
+
 	if knownCount >= 0 {
 		// Reset approximateBacklogCount to fix the count divergence issue
 		dbQueue.ApproximateBacklogCount = knownCount
@@ -348,6 +361,14 @@ func (db *taskQueueDB) updateFairAckLevel(subqueue subqueueIndex, newAckLevel fa
 	} else if countDelta != 0 {
 		db.updateBacklogStatsLocked(subqueue, countDelta, oldestTime)
 	}
+
+	// TODO: Remove after debugging flaky test
+	db.logger.Info("updateFairAckLevel updated count",
+		tag.Int("subqueue-id", int(subqueue)),
+		tag.NewInt64("count-delta", countDelta),
+		tag.NewInt64("known-count", knownCount),
+		tag.NewInt64("old-count", oldCount),
+		tag.NewInt64("new-count", dbQueue.ApproximateBacklogCount))
 }
 
 // Use this to reset ApproximateBacklogCount when the backlog count is known, e.g. when you're
