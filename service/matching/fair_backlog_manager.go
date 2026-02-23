@@ -145,6 +145,13 @@ func (c *fairBacklogManagerImpl) initState(state taskQueueState, err error) {
 
 	if state.otherHasTasks {
 		c.pqMgr.SetupDraining()
+		// Wait for draining backlog to initialize before loading our tasks.
+		// This ensures draining tasks (with higher priority boost) are in the
+		// matcher before active tasks, preventing race conditions where a poller
+		// could match an active task before draining tasks are available.
+		ctx, cancel := context.WithTimeout(c.tqCtx, ioTimeout)
+		_ = c.pqMgr.WaitForDrainingInitialized(ctx)
+		cancel()
 	}
 
 	c.subqueueLock.Lock()
