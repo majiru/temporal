@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/future"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
@@ -57,6 +58,10 @@ type (
 		inGC       bool
 		gcAckLevel int64     // last ack level GCed
 		lastGCTime time.Time // last time GCed
+
+		// initialLoadDone is set after the first batch of tasks is loaded from DB.
+		// Used to synchronize draining backlog initialization.
+		initialLoadDone *future.FutureImpl[struct{}]
 	}
 )
 
@@ -87,12 +92,41 @@ func newPriTaskReader(
 
 		// gc state
 		lastGCTime: time.Now(),
+
+		// synchronization
+		initialLoadDone: future.NewFuture[struct{}](),
 	}
 }
 
 // Start priTaskReader background goroutines.
 func (tr *priTaskReader) Start() {
 	go tr.getTasksPump()
+}
+
+// WaitForInitialLoad waits for the initial batch of tasks to be loaded from the database.
+// This is used to ensure draining backlog tasks are in the matcher before active tasks.
+func (tr *priTaskReader) WaitForInitialLoad(ctx context.Context) error {
+	tr.lock.Lock()
+	f := tr.initialLoadDone
+	tr.lock.Unlock()
+	if f == nil {
+		// Already done
+		return nil
+	}
+	_, err := f.Get(ctx)
+	return err
+}
+
+// signalInitialLoadDone signals that the initial load is complete. Only signals once.
+func (tr *priTaskReader) signalInitialLoadDone() {
+	tr.lock.Lock()
+	initialLoadDone := tr.initialLoadDone
+	tr.initialLoadDone = nil // only set once
+	tr.lock.Unlock()
+
+	if initialLoadDone != nil {
+		initialLoadDone.Set(struct{}{}, nil)
+	}
 }
 
 func (tr *priTaskReader) SignalTaskLoading() {
@@ -209,6 +243,8 @@ func (tr *priTaskReader) getTasksPump() {
 
 		if len(batch.tasks) == 0 {
 			tr.setReadLevelAfterGap(batch.readLevel)
+			// Signal initial load done even if no tasks found
+			tr.signalInitialLoadDone()
 			if !batch.isReadBatchDone {
 				tr.SignalTaskLoading()
 			}
@@ -285,9 +321,18 @@ func (tr *priTaskReader) processTaskBatch(tasks []*persistencespb.AllocatedTaskI
 
 	tr.recordNewTasksLocked(tasks)
 
+	// Signal that initial load is done (only the first time)
+	initialLoadDone := tr.initialLoadDone
+	tr.initialLoadDone = nil // only set once
+
 	tr.lock.Unlock()
 
 	tr.addNewTasks(tasks)
+
+	// Signal completion after tasks are added to matcher
+	if initialLoadDone != nil {
+		initialLoadDone.Set(struct{}{}, nil)
+	}
 }
 
 // To add tasks to the matcher: call recordNewTasksLocked with tr.lock held, then release the

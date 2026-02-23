@@ -166,6 +166,21 @@ func (c *fairBacklogManagerImpl) WaitUntilInitialized(ctx context.Context) error
 	return err
 }
 
+// WaitForTasksLoaded waits for all task readers to complete their initial load from the database.
+// This ensures tasks are in the matcher and ready to be dispatched.
+func (c *fairBacklogManagerImpl) WaitForTasksLoaded(ctx context.Context) error {
+	c.subqueueLock.Lock()
+	subqueues := slices.Clone(c.subqueues)
+	c.subqueueLock.Unlock()
+
+	for _, r := range subqueues {
+		if err := r.WaitForInitialLoad(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *fairBacklogManagerImpl) loadSubqueuesLocked(subqueues []persistencespb.SubqueueInfo) {
 	// TODO(pri): This assumes that subqueues never shrinks, and priority/fairness index of
 	// existing subqueues never changes. If we change that, this logic will need to change.
