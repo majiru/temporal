@@ -258,6 +258,12 @@ func (c *priBacklogManagerImpl) signalReaders(resp createTasksResponse) {
 }
 
 func (c *priBacklogManagerImpl) addSpooledTask(task *internalTask) error {
+	if c.isDraining {
+		// For draining backlogs, add directly to matcher without routing through
+		// partition manager. This ensures tasks stay with the draining backlog and
+		// their completionFunc correctly decrements the draining backlog's count.
+		return c.pqMgr.AddSpooledTaskToMatcher(task)
+	}
 	return c.pqMgr.AddSpooledTask(task)
 }
 
